@@ -17,7 +17,7 @@
           version = "0.1.0";
           src = ./.;
 
-          vendorHash = "sha256-QdaU8vJy+UB3hxH+KRuhCj58PNEYOh8DpT8J78PC7jQ=";
+          vendorHash = "sha256-H/yok1zYhLhNUgykEGSmcv4zdqQRhn6UXU8sQhjakpE=";
 
           meta = {
             description = "Go TUI for D-Bus debugging";

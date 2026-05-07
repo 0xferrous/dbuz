@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/godbus/dbus/v5"
@@ -98,6 +99,7 @@ type entry struct {
 	args        []introspectArg
 	annotations []introspectAnnotation
 	value       string
+	memberName  string
 }
 
 type pane struct {
@@ -113,6 +115,15 @@ type logEntry struct {
 	message string
 }
 
+type callModal struct {
+	method         entry
+	inputs         []textinput.Model
+	focus          int
+	response       []string
+	responseScroll int
+	err            string
+}
+
 type model struct {
 	help      help.Model
 	width     int
@@ -121,6 +132,7 @@ type model struct {
 	panes     []pane
 	logs      []logEntry
 	logScroll int
+	modal     *callModal
 }
 
 type introspectNode struct {
@@ -304,7 +316,11 @@ func (m *model) readInterfacePane(busName, objectPath, interfaceName string) pan
 	for _, method := range iface.Methods {
 		p.entries = append(p.entries, entry{
 			name:        method.Name + memberSignature(method.Args),
+			memberName:  method.Name,
 			detail:      argsDetail(method.Args),
+			busName:     busName,
+			objectPath:  objectPath,
+			interface_:  interfaceName,
 			kind:        entryMethod,
 			args:        method.Args,
 			annotations: method.Annotations,
@@ -413,6 +429,10 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.modal != nil {
+		return m.updateModal(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -526,12 +546,192 @@ func (m *model) dive() {
 			return
 		}
 		m.panes = append(m.panes, m.readInterfacePane(selected.busName, selected.objectPath, selected.interface_))
+	case entryMethod:
+		m.openCallModal(selected)
 	case entryProperty:
 		if m.conn == nil {
 			return
 		}
 		m.readSelectedProperty()
 	}
+}
+
+func (m model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	modal := m.modal
+	if modal == nil {
+		return m, nil
+	}
+
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.modal = nil
+			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
+		case "tab", "shift+tab", "up", "down":
+			if len(modal.inputs) > 0 {
+				if keyMsg.String() == "up" || keyMsg.String() == "shift+tab" {
+					modal.focus = clamp(modal.focus-1, 0, len(modal.inputs)-1)
+				} else {
+					modal.focus = clamp(modal.focus+1, 0, len(modal.inputs)-1)
+				}
+				for i := range modal.inputs {
+					if i == modal.focus {
+						modal.inputs[i].Focus()
+					} else {
+						modal.inputs[i].Blur()
+					}
+				}
+			}
+			return m, nil
+		case "enter":
+			m.callModalMethod()
+			return m, nil
+		case "pgup":
+			modal.responseScroll = clamp(modal.responseScroll-8, 0, max(0, len(modal.response)-1))
+			return m, nil
+		case "pgdown":
+			modal.responseScroll = clamp(modal.responseScroll+8, 0, max(0, len(modal.response)-1))
+			return m, nil
+		}
+	}
+
+	if len(modal.inputs) > 0 {
+		var cmd tea.Cmd
+		modal.inputs[modal.focus], cmd = modal.inputs[modal.focus].Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m *model) openCallModal(method entry) {
+	inputs := make([]textinput.Model, 0)
+	for _, arg := range method.args {
+		if arg.Direction == "out" {
+			continue
+		}
+		input := textinput.New()
+		input.Placeholder = arg.Type + " " + typeDescription(arg.Type)
+		input.Prompt = argLabel(arg) + ": "
+		if len(inputs) == 0 {
+			input.Focus()
+		}
+		inputs = append(inputs, input)
+	}
+	m.modal = &callModal{method: method, inputs: inputs}
+}
+
+func argLabel(arg introspectArg) string {
+	name := arg.Name
+	if name == "" {
+		name = "arg"
+	}
+	return fmt.Sprintf("%s (%s)", name, arg.Type)
+}
+
+func (m *model) callModalMethod() {
+	if m.modal == nil || m.conn == nil {
+		return
+	}
+	method := m.modal.method
+	args := make([]any, 0, len(m.modal.inputs))
+	inputIndex := 0
+	for _, arg := range method.args {
+		if arg.Direction == "out" {
+			continue
+		}
+		value, err := parseDBusInput(arg.Type, m.modal.inputs[inputIndex].Value())
+		if err != nil {
+			m.modal.err = err.Error()
+			return
+		}
+		args = append(args, value)
+		inputIndex++
+	}
+
+	member := method.interface_ + "." + method.memberName
+	m.log("call %s %s %s args=%v", method.busName, method.objectPath, member, args)
+	call := m.conn.Object(method.busName, dbus.ObjectPath(method.objectPath)).Call(member, 0, args...)
+	if call.Err != nil {
+		m.modal.err = call.Err.Error()
+		m.modal.response = nil
+		m.log("error method %s: %v", member, call.Err)
+		return
+	}
+	m.modal.err = ""
+	m.modal.response = formatResponseLines(call.Body)
+	m.modal.responseScroll = 0
+	m.log("reply method %s: %v", member, call.Body)
+}
+
+func parseDBusInput(signature, raw string) (any, error) {
+	switch signature {
+	case "s", "o", "g":
+		return raw, nil
+	case "b":
+		if raw == "true" {
+			return true, nil
+		}
+		if raw == "false" {
+			return false, nil
+		}
+		return nil, fmt.Errorf("%s expects true or false", signature)
+	case "y":
+		var v uint8
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "n":
+		var v int16
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "q":
+		var v uint16
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "i":
+		var v int32
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "u":
+		var v uint32
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "x":
+		var v int64
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "t":
+		var v uint64
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "d":
+		var v float64
+		_, err := fmt.Sscan(raw, &v)
+		return v, err
+	case "as":
+		if raw == "" {
+			return []string{}, nil
+		}
+		parts := strings.Split(raw, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		return parts, nil
+	default:
+		return nil, fmt.Errorf("input parsing for %q not supported yet", signature)
+	}
+}
+
+func formatResponseLines(values []any) []string {
+	if len(values) == 0 {
+		return []string{"<empty reply>"}
+	}
+	lines := make([]string, 0, len(values))
+	for i, value := range values {
+		lines = append(lines, fmt.Sprintf("[%d] %#v", i, value))
+	}
+	return lines
 }
 
 func (m *model) readSelectedProperty() {
@@ -590,13 +790,60 @@ func (m model) View() string {
 	tree := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 	breadcrumb := m.breadcrumb()
 
-	return lipgloss.JoinVertical(
+	view := lipgloss.JoinVertical(
 		lipgloss.Left,
 		titleStyle.Render("dbus-debug")+" "+statusStyle.Render(breadcrumb),
 		tree,
 		renderLogPane(m.logs, m.logScroll, m.width, logHeight),
 		m.help.View(keys),
 	)
+	if m.modal != nil {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, renderCallModal(*m.modal, m.width, m.height))
+	}
+	return view
+}
+
+func renderCallModal(modal callModal, terminalWidth, terminalHeight int) string {
+	width := clamp(terminalWidth*3/5, 50, max(50, terminalWidth-4))
+	height := clamp(terminalHeight*3/5, 12, max(12, terminalHeight-4))
+	innerWidth := width - 4
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Render("Call method"),
+		truncate(modal.method.busName+" "+modal.method.objectPath, innerWidth),
+		truncate(modal.method.interface_+"."+modal.method.memberName, innerWidth),
+		strings.Repeat("─", innerWidth),
+	}
+
+	if len(modal.inputs) == 0 {
+		lines = append(lines, "no input arguments")
+	} else {
+		for _, input := range modal.inputs {
+			lines = append(lines, truncate(input.View(), innerWidth))
+		}
+	}
+
+	lines = append(lines, "", "[esc] cancel    [enter] call")
+	if modal.err != "" {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#F38BA8")).Render("error: "+truncate(modal.err, innerWidth-7)))
+	}
+	if len(modal.response) > 0 {
+		lines = append(lines, strings.Repeat("─", innerWidth), "response:")
+		used := len(lines)
+		viewport := max(1, height-used-2)
+		start := clamp(modal.responseScroll, 0, max(0, len(modal.response)-viewport))
+		end := min(len(modal.response), start+viewport)
+		for _, line := range modal.response[start:end] {
+			lines = append(lines, truncate(line, innerWidth))
+		}
+	}
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#CBA6F7")).
+		Padding(1, 2).
+		Width(width).
+		Height(height).
+		Render(strings.Join(lines, "\n"))
 }
 
 func (m model) breadcrumb() string {
