@@ -372,7 +372,7 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool, owners
 		m.log("reply org.freedesktop.DBus.GetConnectionUnixUser %s: %d", name, uid)
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, ", ")
 }
 
 func formatPID(pid uint32) string {
