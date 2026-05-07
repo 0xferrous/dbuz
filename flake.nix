@@ -17,7 +17,7 @@
           version = "0.1.0";
           src = ./.;
 
-          vendorHash = "sha256-H/yok1zYhLhNUgykEGSmcv4zdqQRhn6UXU8sQhjakpE=";
+          vendorHash = "sha256-3vEtia3sTnsHvDaRskgfFl6X1OwDg0kJSDOYBA3ksYY=";
 
           meta = {
             description = "Terminal UI for exploring and interacting with D-Bus";
