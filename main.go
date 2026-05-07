@@ -492,8 +492,8 @@ func (m model) pageSize() int {
 	logHeight := m.logViewportHeight()
 	paneHeight := max(1, m.height-logHeight-5)
 	metaHeight := 0
-	if p := m.activePane(); p != nil && selectedMetadata(*p) != "" {
-		metaHeight = 4
+	if p := m.activePane(); p != nil {
+		metaHeight = metadataBlockHeight(*p, paneHeight)
 	}
 	return max(1, paneHeight-3-metaHeight)
 }
@@ -599,11 +599,8 @@ func renderPane(p pane, width, height int, active bool) string {
 		Height(height)
 
 	innerWidth := width - 4
-	metadata := selectedMetadata(p)
-	metaHeight := 0
-	if metadata != "" {
-		metaHeight = 4
-	}
+	metadata := selectedMetadataLines(p)
+	metaHeight := metadataBlockHeight(p, height)
 
 	header := lipgloss.NewStyle().Bold(true).Render(truncate(p.title, innerWidth))
 	lines := []string{header, strings.Repeat("─", max(0, innerWidth))}
@@ -621,12 +618,12 @@ func renderPane(p pane, width, height int, active bool) string {
 		}
 	}
 
-	if metadata != "" {
+	if len(metadata) > 0 && metaHeight > 0 {
 		for len(lines) < max(0, height-metaHeight-1) {
 			lines = append(lines, "")
 		}
 		lines = append(lines, strings.Repeat("─", max(0, innerWidth)))
-		for _, line := range strings.Split(metadata, "\n") {
+		for _, line := range metadata[:min(len(metadata), metaHeight-1)] {
 			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#A6ADC8")).Render(truncate(line, innerWidth)))
 		}
 	}
@@ -642,25 +639,77 @@ func renderEntry(e entry, selected bool, width int) string {
 	return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
 }
 
-func selectedMetadata(p pane) string {
-	if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
-		return ""
+func metadataBlockHeight(p pane, paneHeight int) int {
+	lines := selectedMetadataLines(p)
+	if len(lines) == 0 {
+		return 0
 	}
-	return entryMetadata(p.entries[p.cursor])
+	// Separator + metadata, leaving header/separator and at least one list row.
+	return min(len(lines)+1, max(0, paneHeight-4))
 }
 
-func entryMetadata(e entry) string {
-	lines := make([]string, 0, 3)
-	if e.detail != "" {
-		lines = append(lines, e.detail)
+func selectedMetadataLines(p pane) []string {
+	if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+		return nil
 	}
-	if len(e.args) > 0 {
-		lines = append(lines, argsDetail(e.args))
+	return entryMetadataLines(p.entries[p.cursor])
+}
+
+func entryMetadataLines(e entry) []string {
+	lines := make([]string, 0, 8)
+	switch e.kind {
+	case entryInterface:
+		lines = append(lines, splitDetail(e.detail)...)
+	case entryMethod, entrySignal:
+		lines = append(lines, "args:")
+		if len(e.args) == 0 {
+			lines = append(lines, "  none")
+		}
+		for _, arg := range e.args {
+			name := arg.Name
+			if name == "" {
+				name = "_"
+			}
+			direction := arg.Direction
+			if direction == "" {
+				direction = "in"
+			}
+			lines = append(lines, fmt.Sprintf("  %s %s: %s", direction, name, arg.Type))
+		}
+	case entryProperty:
+		fields := strings.Fields(e.detail)
+		if len(fields) > 0 {
+			lines = append(lines, "type: "+fields[0])
+		}
+		if len(fields) > 1 {
+			lines = append(lines, "access: "+fields[1])
+		}
+	default:
+		lines = append(lines, splitDetail(e.detail)...)
 	}
+
 	if len(e.annotations) > 0 {
-		lines = append(lines, fmt.Sprintf("%d annotations", len(e.annotations)))
+		lines = append(lines, "annotations:")
+		for _, annotation := range e.annotations {
+			lines = append(lines, fmt.Sprintf("  %s: %s", annotation.Name, annotation.Value))
+		}
 	}
-	return strings.Join(lines, "\n")
+	return lines
+}
+
+func splitDetail(detail string) []string {
+	if detail == "" {
+		return nil
+	}
+	parts := strings.Split(detail, ",")
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			lines = append(lines, part)
+		}
+	}
+	return lines
 }
 
 func kindIcon(kind entryKind) string {
