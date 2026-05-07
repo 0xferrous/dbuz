@@ -242,11 +242,13 @@ func (m *model) readBusNamesPane(busType string) pane {
 	}
 
 	m.log("reply org.freedesktop.DBus.ListNames: %d names", len(names))
+	activatable := m.activatableNames()
 	sort.Strings(names)
 	p.entries = make([]entry, 0, len(names))
 	for _, name := range names {
 		p.entries = append(p.entries, entry{
 			name:       name,
+			detail:     m.busNameMetadata(name, activatable),
 			path:       name,
 			busName:    name,
 			objectPath: "/",
@@ -254,6 +256,69 @@ func (m *model) readBusNamesPane(busType string) pane {
 		})
 	}
 	return p
+}
+
+func (m *model) activatableNames() map[string]bool {
+	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListActivatableNames")
+	var names []string
+	if err := obj.Call("org.freedesktop.DBus.ListActivatableNames", 0).Store(&names); err != nil {
+		m.log("error org.freedesktop.DBus.ListActivatableNames: %v", err)
+		return nil
+	}
+	m.log("reply org.freedesktop.DBus.ListActivatableNames: %d names", len(names))
+	activatable := make(map[string]bool, len(names))
+	for _, name := range names {
+		activatable[name] = true
+	}
+	return activatable
+}
+
+func (m *model) busNameMetadata(name string, activatable map[string]bool) string {
+	lines := []string{"kind: " + busNameKind(name)}
+	if activatable[name] {
+		lines = append(lines, "activatable: yes")
+	}
+
+	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	if !strings.HasPrefix(name, ":") {
+		m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner %s", name)
+		var owner string
+		if err := obj.Call("org.freedesktop.DBus.GetNameOwner", 0, name).Store(&owner); err != nil {
+			lines = append(lines, "owner: <none>")
+			m.log("error org.freedesktop.DBus.GetNameOwner %s: %v", name, err)
+		} else {
+			lines = append(lines, "owner: "+owner)
+			m.log("reply org.freedesktop.DBus.GetNameOwner %s: %s", name, owner)
+		}
+	}
+
+	var pid uint32
+	m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID %s", name)
+	if err := obj.Call("org.freedesktop.DBus.GetConnectionUnixProcessID", 0, name).Store(&pid); err != nil {
+		m.log("error org.freedesktop.DBus.GetConnectionUnixProcessID %s: %v", name, err)
+	} else {
+		lines = append(lines, fmt.Sprintf("pid: %d", pid))
+		m.log("reply org.freedesktop.DBus.GetConnectionUnixProcessID %s: %d", name, pid)
+	}
+
+	var uid uint32
+	m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixUser %s", name)
+	if err := obj.Call("org.freedesktop.DBus.GetConnectionUnixUser", 0, name).Store(&uid); err != nil {
+		m.log("error org.freedesktop.DBus.GetConnectionUnixUser %s: %v", name, err)
+	} else {
+		lines = append(lines, fmt.Sprintf("uid: %d", uid))
+		m.log("reply org.freedesktop.DBus.GetConnectionUnixUser %s: %d", name, uid)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func busNameKind(name string) string {
+	if strings.HasPrefix(name, ":") {
+		return "unique"
+	}
+	return "well-known"
 }
 
 func (m *model) readObjectPane(busName, objectPath string) pane {
