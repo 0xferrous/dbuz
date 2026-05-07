@@ -488,8 +488,14 @@ func (p *pane) ensureCursorVisible(viewport int) {
 }
 
 func (m model) pageSize() int {
-	// Pane body height minus header and separator, matching renderPane's viewport.
-	return max(1, m.height-7)
+	// Explorer height minus pane header/separator and optional selected-item metadata.
+	logHeight := m.logViewportHeight()
+	paneHeight := max(1, m.height-logHeight-5)
+	metaHeight := 0
+	if p := m.activePane(); p != nil && selectedMetadata(*p) != "" {
+		metaHeight = 4
+	}
+	return max(1, paneHeight-3-metaHeight)
 }
 
 func (m *model) dive() {
@@ -592,19 +598,36 @@ func renderPane(p pane, width, height int, active bool) string {
 		Width(width).
 		Height(height)
 
-	header := lipgloss.NewStyle().Bold(true).Render(truncate(p.title, width-4))
-	lines := []string{header, strings.Repeat("─", max(0, width-4))}
+	innerWidth := width - 4
+	metadata := selectedMetadata(p)
+	metaHeight := 0
+	if metadata != "" {
+		metaHeight = 4
+	}
+
+	header := lipgloss.NewStyle().Bold(true).Render(truncate(p.title, innerWidth))
+	lines := []string{header, strings.Repeat("─", max(0, innerWidth))}
 
 	if p.err != nil {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#F38BA8")).Render(p.err.Error()))
 	} else if len(p.entries) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("empty"))
 	} else {
-		viewport := max(1, height-3)
+		viewport := max(1, height-3-metaHeight)
 		start := clamp(p.scroll, 0, max(0, len(p.entries)-viewport))
 		end := min(len(p.entries), start+viewport)
 		for i := start; i < end; i++ {
-			lines = append(lines, renderEntry(p.entries[i], i == p.cursor && active, width-4))
+			lines = append(lines, renderEntry(p.entries[i], i == p.cursor && active, innerWidth))
+		}
+	}
+
+	if metadata != "" {
+		for len(lines) < max(0, height-metaHeight-1) {
+			lines = append(lines, "")
+		}
+		lines = append(lines, strings.Repeat("─", max(0, innerWidth)))
+		for _, line := range strings.Split(metadata, "\n") {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#A6ADC8")).Render(truncate(line, innerWidth)))
 		}
 	}
 
@@ -612,33 +635,32 @@ func renderPane(p pane, width, height int, active bool) string {
 }
 
 func renderEntry(e entry, selected bool, width int) string {
-	prefix := kindIcon(e.kind) + e.name
-	if e.detail == "" {
-		line := truncate(prefix, width)
-		if selected {
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
-		}
-		return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
-	}
-
-	separator := "  "
-	prefixWidth := textWidth(prefix)
-	separatorWidth := textWidth(separator)
-	if prefixWidth+separatorWidth >= width {
-		line := truncate(prefix, width)
-		if selected {
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
-		}
-		return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
-	}
-
-	detail := truncate(e.detail, width-prefixWidth-separatorWidth)
+	line := truncate(kindIcon(e.kind)+e.name, width)
 	if selected {
-		line := prefix + separator + detail
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
 	}
+	return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
+}
 
-	return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(prefix) + separator + lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render(detail)
+func selectedMetadata(p pane) string {
+	if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+		return ""
+	}
+	return entryMetadata(p.entries[p.cursor])
+}
+
+func entryMetadata(e entry) string {
+	lines := make([]string, 0, 3)
+	if e.detail != "" {
+		lines = append(lines, e.detail)
+	}
+	if len(e.args) > 0 {
+		lines = append(lines, argsDetail(e.args))
+	}
+	if len(e.annotations) > 0 {
+		lines = append(lines, fmt.Sprintf("%d annotations", len(e.annotations)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func kindIcon(kind entryKind) string {
@@ -693,11 +715,7 @@ func joinObjectPath(parent, child string) string {
 func paneDisplayWidth(p pane, terminalWidth int) int {
 	contentWidth := textWidth(p.title)
 	for _, entry := range p.entries {
-		line := kindIcon(entry.kind) + entry.name
-		if entry.detail != "" {
-			line += "  " + entry.detail
-		}
-		contentWidth = max(contentWidth, textWidth(line))
+		contentWidth = max(contentWidth, textWidth(kindIcon(entry.kind)+entry.name))
 	}
 
 	// Add room for borders/padding, then clamp so very long D-Bus names do not
