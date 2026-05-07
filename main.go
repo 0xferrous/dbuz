@@ -97,6 +97,7 @@ type entry struct {
 	kind        entryKind
 	args        []introspectArg
 	annotations []introspectAnnotation
+	value       string
 }
 
 type pane struct {
@@ -322,6 +323,9 @@ func (m *model) readInterfacePane(busName, objectPath, interfaceName string) pan
 		p.entries = append(p.entries, entry{
 			name:        prop.Name,
 			detail:      fmt.Sprintf("%s %s", prop.Type, prop.Access),
+			busName:     busName,
+			objectPath:  objectPath,
+			interface_:  interfaceName,
 			kind:        entryProperty,
 			annotations: prop.Annotations,
 		})
@@ -522,7 +526,37 @@ func (m *model) dive() {
 			return
 		}
 		m.panes = append(m.panes, m.readInterfacePane(selected.busName, selected.objectPath, selected.interface_))
+	case entryProperty:
+		if m.conn == nil {
+			return
+		}
+		m.readSelectedProperty()
 	}
+}
+
+func (m *model) readSelectedProperty() {
+	p := m.activePane()
+	if p == nil || len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+		return
+	}
+
+	selected := &p.entries[p.cursor]
+	m.log("call %s %s org.freedesktop.DBus.Properties.Get %s %s", selected.busName, selected.objectPath, selected.interface_, selected.name)
+	obj := m.conn.Object(selected.busName, dbus.ObjectPath(selected.objectPath))
+
+	var value dbus.Variant
+	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, selected.interface_, selected.name).Store(&value); err != nil {
+		m.log("error property get %s.%s: %v", selected.interface_, selected.name, err)
+		selected.value = "error: " + err.Error()
+		return
+	}
+
+	selected.value = formatDBusValue(value.Value())
+	m.log("reply property get %s.%s: %s", selected.interface_, selected.name, selected.value)
+}
+
+func formatDBusValue(value any) string {
+	return fmt.Sprintf("%#v", value)
 }
 
 func (m *model) back() {
@@ -720,6 +754,12 @@ func entryMetadataLines(e entry) []string {
 		}
 		if len(fields) > 1 {
 			lines = append(lines, "access: "+fields[1])
+		}
+		if e.value != "" {
+			lines = append(lines, "value:")
+			lines = append(lines, "  "+e.value)
+		} else if len(fields) > 1 && (fields[1] == "read" || fields[1] == "readwrite") {
+			lines = append(lines, "enter: read value")
 		}
 	default:
 		lines = append(lines, splitDetail(e.detail)...)
