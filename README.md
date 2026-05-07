@@ -78,6 +78,23 @@ There are two broad kinds:
 
 Well-known names are usually what humans care about. Unique names identify a specific connection to the bus.
 
+`dbus-debug` shows metadata for selected bus names when available:
+
+- kind: `well-known` or `unique`
+- whether the name is activatable
+- current owner unique name for well-known names
+- Unix process ID of the owning connection
+- Unix user ID of the owning connection
+
+This metadata comes from standard `org.freedesktop.DBus` calls:
+
+```text
+ListActivatableNames
+GetNameOwner
+GetConnectionUnixProcessID
+GetConnectionUnixUser
+```
+
 ## Object paths and objects
 
 A D-Bus service exposes objects at object paths.
@@ -291,6 +308,7 @@ Implemented:
 
 - session/system bus selection
 - bus name browsing
+- bus name metadata: kind, activatable status, owner, PID, UID
 - object path browsing
 - interface browsing
 - method/property/signal browsing
