@@ -609,7 +609,7 @@ func (m model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) openCallModal(method entry) {
 	inputs := make([]textinput.Model, 0)
 	for _, arg := range method.args {
-		if arg.Direction == "out" {
+		if isOutArg(arg) {
 			continue
 		}
 		input := textinput.New()
@@ -639,7 +639,7 @@ func (m *model) callModalMethod() {
 	args := make([]any, 0, len(m.modal.inputs))
 	inputIndex := 0
 	for _, arg := range method.args {
-		if arg.Direction == "out" {
+		if isOutArg(arg) {
 			continue
 		}
 		value, err := parseDBusInput(arg.Type, m.modal.inputs[inputIndex].Value())
@@ -666,11 +666,23 @@ func (m *model) callModalMethod() {
 	m.log("reply method %s: %v", member, call.Body)
 }
 
+func isOutArg(arg introspectArg) bool {
+	return strings.TrimSpace(arg.Direction) == "out"
+}
+
 func parseDBusInput(signature, raw string) (any, error) {
 	raw = strings.TrimSpace(raw)
 	switch signature {
-	case "s", "o", "g":
+	case "s":
 		return raw, nil
+	case "o":
+		return dbus.ObjectPath(raw), nil
+	case "g":
+		sig, err := dbus.ParseSignature(raw)
+		if err != nil {
+			return nil, err
+		}
+		return sig, nil
 	case "b":
 		if raw == "true" {
 			return true, nil
