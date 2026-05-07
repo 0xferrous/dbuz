@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"os/user"
 	"sort"
 	"strings"
 	"time"
@@ -307,11 +308,20 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool) string
 	if err := obj.Call("org.freedesktop.DBus.GetConnectionUnixUser", 0, name).Store(&uid); err != nil {
 		m.log("error org.freedesktop.DBus.GetConnectionUnixUser %s: %v", name, err)
 	} else {
-		lines = append(lines, fmt.Sprintf("uid: %d", uid))
+		lines = append(lines, "uid: "+formatUID(uid))
 		m.log("reply org.freedesktop.DBus.GetConnectionUnixUser %s: %d", name, uid)
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func formatUID(uid uint32) string {
+	uidText := fmt.Sprint(uid)
+	userInfo, err := user.LookupId(uidText)
+	if err != nil || userInfo.Username == "" {
+		return uidText
+	}
+	return fmt.Sprintf("%s (%s)", uidText, userInfo.Username)
 }
 
 func busNameKind(name string) string {
