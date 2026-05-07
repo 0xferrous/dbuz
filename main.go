@@ -554,18 +554,43 @@ func (m model) View() string {
 	}
 
 	tree := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
-	path := ""
-	if p := m.activePane(); p != nil {
-		path = p.title
-	}
+	breadcrumb := m.breadcrumb()
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render("dbus-debug")+" "+statusStyle.Render(path),
+		titleStyle.Render("dbus-debug")+" "+statusStyle.Render(breadcrumb),
 		tree,
 		renderLogPane(m.logs, m.logScroll, m.width, logHeight),
 		m.help.View(keys),
 	)
+}
+
+func (m model) breadcrumb() string {
+	parts := make([]string, 0, len(m.panes)+1)
+	for _, p := range m.panes {
+		if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+			continue
+		}
+
+		selected := p.entries[p.cursor]
+		switch selected.kind {
+		case entryBus:
+			parts = append(parts, selected.name)
+		case entryBusName:
+			parts = append(parts, selected.busName)
+		case entryObject:
+			parts = append(parts, selected.objectPath)
+		case entryInterface:
+			parts = append(parts, selected.interface_)
+		case entryMethod, entryProperty, entrySignal:
+			parts = append(parts, selected.name)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " › ")
 }
 
 func renderLogPane(logs []logEntry, scroll, width, height int) string {
@@ -619,9 +644,6 @@ func renderPane(p pane, width, height int, active bool) string {
 	}
 
 	if len(metadata) > 0 && metaHeight > 0 {
-		for len(lines) < max(0, height-metaHeight-1) {
-			lines = append(lines, "")
-		}
 		lines = append(lines, strings.Repeat("─", max(0, innerWidth)))
 		for _, line := range metadata[:min(len(metadata), metaHeight-1)] {
 			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#A6ADC8")).Render(truncate(line, innerWidth)))
