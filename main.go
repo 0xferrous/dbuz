@@ -1154,29 +1154,24 @@ func renderEntry(e entry, selected bool, width int) string {
 
 func metadataBlockHeight(p pane, paneHeight int) int {
 	entry, ok := selectedEntry(p)
-	if !ok || len(entryMetadataLines(entry)) == 0 {
+	if !ok {
+		return 0
+	}
+	lines := entryMetadataLines(entry)
+	if len(lines) == 0 {
 		return 0
 	}
 
-	// Separator + fixed metadata slots by item kind. Fixed heights keep panes
-	// stable while moving selection, especially in the bus-name pane where the
-	// metadata shape is bounded and predictable.
-	wanted := 0
-	switch entry.kind {
-	case entryBusName:
-		wanted = 6 // separator + kind/activatable/owner/pid/uid
-	case entryInterface:
-		wanted = 5 // separator + methods/properties/signals/annotations summary
-	case entryProperty:
-		wanted = 6 // separator + type/decoded/access/value hint
-	case entryMethod, entrySignal:
-		wanted = 9 // separator + args/decoded types/annotations summary
-	default:
-		wanted = min(len(entryMetadataLines(entry))+1, 5)
+	// Bus-name metadata is bounded and predictable:
+	// separator + kind/activatable/owner/pid/uid.
+	if entry.kind == entryBusName {
+		return min(6, max(0, paneHeight-6))
 	}
 
-	// Always leave room for header, separator, and at least four list rows.
-	return min(wanted, max(0, paneHeight-6))
+	// Other metadata is content-sized as before, but capped so large annotations
+	// or arg lists cannot push the pane/breadcrumb outside the terminal.
+	maxMetadata := max(0, min(paneHeight/2, paneHeight-6))
+	return min(len(lines)+1, maxMetadata)
 }
 
 func selectedMetadataLines(p pane) []string {
