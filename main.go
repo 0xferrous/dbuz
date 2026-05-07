@@ -76,13 +76,16 @@ const (
 )
 
 type entry struct {
-	name       string
-	path       string
-	busName    string
-	objectPath string
-	interface_ string
-	busType    string
-	kind       entryKind
+	name        string
+	detail      string
+	path        string
+	busName     string
+	objectPath  string
+	interface_  string
+	busType     string
+	kind        entryKind
+	args        []introspectArg
+	annotations []introspectAnnotation
 }
 
 type pane struct {
@@ -113,20 +116,35 @@ type introspectChildNode struct {
 }
 
 type introspectInterface struct {
-	Name       string               `xml:"name,attr"`
-	Methods    []introspectMember   `xml:"method"`
-	Signals    []introspectMember   `xml:"signal"`
-	Properties []introspectProperty `xml:"property"`
+	Name        string                 `xml:"name,attr"`
+	Methods     []introspectMember     `xml:"method"`
+	Signals     []introspectMember     `xml:"signal"`
+	Properties  []introspectProperty   `xml:"property"`
+	Annotations []introspectAnnotation `xml:"annotation"`
 }
 
 type introspectMember struct {
-	Name string `xml:"name,attr"`
+	Name        string                 `xml:"name,attr"`
+	Args        []introspectArg        `xml:"arg"`
+	Annotations []introspectAnnotation `xml:"annotation"`
+}
+
+type introspectArg struct {
+	Name      string `xml:"name,attr"`
+	Type      string `xml:"type,attr"`
+	Direction string `xml:"direction,attr"`
 }
 
 type introspectProperty struct {
-	Name   string `xml:"name,attr"`
-	Type   string `xml:"type,attr"`
-	Access string `xml:"access,attr"`
+	Name        string                 `xml:"name,attr"`
+	Type        string                 `xml:"type,attr"`
+	Access      string                 `xml:"access,attr"`
+	Annotations []introspectAnnotation `xml:"annotation"`
+}
+
+type introspectAnnotation struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
 }
 
 func initialModel() model {
@@ -210,12 +228,14 @@ func (m model) readObjectPane(busName, objectPath string) pane {
 
 	for _, iface := range node.Interfaces {
 		p.entries = append(p.entries, entry{
-			name:       iface.Name,
-			path:       busName + objectPath + "#" + iface.Name,
-			busName:    busName,
-			objectPath: objectPath,
-			interface_: iface.Name,
-			kind:       entryInterface,
+			name:        iface.Name,
+			detail:      fmt.Sprintf("%d methods, %d properties, %d signals", len(iface.Methods), len(iface.Properties), len(iface.Signals)),
+			path:        busName + objectPath + "#" + iface.Name,
+			busName:     busName,
+			objectPath:  objectPath,
+			interface_:  iface.Name,
+			kind:        entryInterface,
+			annotations: iface.Annotations,
 		})
 	}
 
@@ -246,17 +266,30 @@ func (m model) readInterfacePane(busName, objectPath, interfaceName string) pane
 	}
 
 	for _, method := range iface.Methods {
-		p.entries = append(p.entries, entry{name: method.Name, kind: entryMethod})
+		p.entries = append(p.entries, entry{
+			name:        method.Name + memberSignature(method.Args),
+			detail:      argsDetail(method.Args),
+			kind:        entryMethod,
+			args:        method.Args,
+			annotations: method.Annotations,
+		})
 	}
 	for _, signal := range iface.Signals {
-		p.entries = append(p.entries, entry{name: signal.Name, kind: entrySignal})
+		p.entries = append(p.entries, entry{
+			name:        signal.Name + signalSignature(signal.Args),
+			detail:      argsDetail(signal.Args),
+			kind:        entrySignal,
+			args:        signal.Args,
+			annotations: signal.Annotations,
+		})
 	}
 	for _, prop := range iface.Properties {
-		label := prop.Name
-		if prop.Type != "" || prop.Access != "" {
-			label = fmt.Sprintf("%s: %s %s", prop.Name, prop.Type, prop.Access)
-		}
-		p.entries = append(p.entries, entry{name: label, kind: entryProperty})
+		p.entries = append(p.entries, entry{
+			name:        prop.Name,
+			detail:      fmt.Sprintf("%s %s", prop.Type, prop.Access),
+			kind:        entryProperty,
+			annotations: prop.Annotations,
+		})
 	}
 
 	sortEntries(p.entries)
@@ -284,6 +317,52 @@ func sortEntries(entries []entry) {
 		}
 		return strings.ToLower(entries[i].name) < strings.ToLower(entries[j].name)
 	})
+}
+
+func memberSignature(args []introspectArg) string {
+	in := make([]string, 0)
+	out := make([]string, 0)
+	for _, arg := range args {
+		if arg.Direction == "out" {
+			out = append(out, arg.Type)
+			continue
+		}
+		in = append(in, arg.Type)
+	}
+
+	sig := "(" + strings.Join(in, ", ") + ")"
+	if len(out) > 0 {
+		sig += " → " + strings.Join(out, ", ")
+	}
+	return sig
+}
+
+func signalSignature(args []introspectArg) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		parts = append(parts, arg.Type)
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func argsDetail(args []introspectArg) string {
+	if len(args) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		name := arg.Name
+		if name == "" {
+			name = "_"
+		}
+		direction := arg.Direction
+		if direction == "" {
+			direction = "in"
+		}
+		parts = append(parts, fmt.Sprintf("%s %s:%s", direction, name, arg.Type))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (m model) Init() tea.Cmd {
@@ -466,11 +545,33 @@ func renderPane(p pane, width, height int, active bool) string {
 }
 
 func renderEntry(e entry, selected bool, width int) string {
-	line := truncate(kindIcon(e.kind)+e.name, width)
+	prefix := kindIcon(e.kind) + e.name
+	if e.detail == "" {
+		line := truncate(prefix, width)
+		if selected {
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
+		}
+		return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
+	}
+
+	separator := "  "
+	prefixWidth := textWidth(prefix)
+	separatorWidth := textWidth(separator)
+	if prefixWidth+separatorWidth >= width {
+		line := truncate(prefix, width)
+		if selected {
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
+		}
+		return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
+	}
+
+	detail := truncate(e.detail, width-prefixWidth-separatorWidth)
 	if selected {
+		line := prefix + separator + detail
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#11111B")).Background(lipgloss.Color("#CBA6F7")).Width(width).Render(line)
 	}
-	return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(line)
+
+	return lipgloss.NewStyle().Foreground(kindColor(e.kind)).Render(prefix) + separator + lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render(detail)
 }
 
 func kindIcon(kind entryKind) string {
@@ -525,7 +626,11 @@ func joinObjectPath(parent, child string) string {
 func paneDisplayWidth(p pane, terminalWidth int) int {
 	contentWidth := textWidth(p.title)
 	for _, entry := range p.entries {
-		contentWidth = max(contentWidth, textWidth(kindIcon(entry.kind)+entry.name))
+		line := kindIcon(entry.kind) + entry.name
+		if entry.detail != "" {
+			line += "  " + entry.detail
+		}
+		contentWidth = max(contentWidth, textWidth(line))
 	}
 
 	// Add room for borders/padding, then clamp so very long D-Bus names do not
