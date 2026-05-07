@@ -609,7 +609,7 @@ func (m model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) openCallModal(method entry) {
 	inputs := make([]textinput.Model, 0)
 	for _, arg := range method.args {
-		if isOutArg(arg) {
+		if methodArgIsOut(method, arg) {
 			continue
 		}
 		input := textinput.New()
@@ -639,7 +639,7 @@ func (m *model) callModalMethod() {
 	args := make([]any, 0, len(m.modal.inputs))
 	inputIndex := 0
 	for _, arg := range method.args {
-		if isOutArg(arg) {
+		if methodArgIsOut(method, arg) {
 			continue
 		}
 		value, err := parseDBusInput(arg.Type, m.modal.inputs[inputIndex].Value())
@@ -652,7 +652,7 @@ func (m *model) callModalMethod() {
 	}
 
 	member := method.interface_ + "." + method.memberName
-	m.log("call %s %s %s sig=%s args=%v", method.busName, method.objectPath, member, dbusInputSignature(method.args), args)
+	m.log("call %s %s %s sig=%s args=%v", method.busName, method.objectPath, member, dbusInputSignature(method), args)
 	call := m.conn.Object(method.busName, dbus.ObjectPath(method.objectPath)).Call(member, 0, args...)
 	if call.Err != nil {
 		m.modal.err = call.Err.Error()
@@ -664,6 +664,24 @@ func (m *model) callModalMethod() {
 	m.modal.response = formatResponseLines(call.Body)
 	m.modal.responseScroll = 0
 	m.log("reply method %s: %v", member, call.Body)
+}
+
+func methodArgIsOut(method entry, arg introspectArg) bool {
+	if strings.TrimSpace(arg.Direction) == "out" {
+		return true
+	}
+
+	// xdg-desktop-portal backend introspection can be incomplete/misleading in
+	// practice. The published API marks these as OUT for impl FileChooser calls:
+	// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.impl.portal.FileChooser.html
+	if method.interface_ == "org.freedesktop.impl.portal.FileChooser" {
+		switch arg.Name {
+		case "response", "results":
+			return true
+		}
+	}
+
+	return false
 }
 
 func isOutArg(arg introspectArg) bool {
@@ -732,10 +750,10 @@ func parseDBusInput(signature, raw string) (any, error) {
 	}
 }
 
-func dbusInputSignature(args []introspectArg) string {
+func dbusInputSignature(method entry) string {
 	var b strings.Builder
-	for _, arg := range args {
-		if !isOutArg(arg) {
+	for _, arg := range method.args {
+		if !methodArgIsOut(method, arg) {
 			b.WriteString(arg.Type)
 		}
 	}
