@@ -667,7 +667,19 @@ func (m *model) callModalMethod() {
 }
 
 func isOutArg(arg introspectArg) bool {
-	return strings.TrimSpace(arg.Direction) == "out"
+	direction := strings.TrimSpace(arg.Direction)
+	if direction == "out" {
+		return true
+	}
+	if direction != "" {
+		return false
+	}
+
+	// Some services expose incomplete introspection and omit method arg
+	// directions. Portal implementations commonly list output args named
+	// "handle"/"results" without marking them as out, which otherwise makes us
+	// send too many args and D-Bus replies with "Invalid type / number of args".
+	return (arg.Name == "handle" && arg.Type == "o") || (arg.Name == "results" && arg.Type == "a{sv}")
 }
 
 func parseDBusInput(signature, raw string) (any, error) {
