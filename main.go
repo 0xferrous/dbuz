@@ -244,12 +244,15 @@ func (m *model) readBusNamesPane(busType string) pane {
 
 	m.log("reply org.freedesktop.DBus.ListNames: %d names", len(names))
 	activatable := m.activatableNames()
+	owners := m.busNameOwners(names)
+	wellKnownByOwner := wellKnownNamesByOwner(owners)
 	sort.Strings(names)
 	p.entries = make([]entry, 0, len(names))
 	for _, name := range names {
+		displayName := busNameDisplayName(name, owners, wellKnownByOwner)
 		p.entries = append(p.entries, entry{
-			name:       name,
-			detail:     m.busNameMetadata(name, activatable),
+			name:       displayName,
+			detail:     m.busNameMetadata(name, activatable, owners),
 			path:       name,
 			busName:    name,
 			objectPath: "/",
@@ -275,7 +278,55 @@ func (m *model) activatableNames() map[string]bool {
 	return activatable
 }
 
-func (m *model) busNameMetadata(name string, activatable map[string]bool) string {
+func (m *model) busNameOwners(names []string) map[string]string {
+	owners := make(map[string]string, len(names))
+	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	for _, name := range names {
+		if strings.HasPrefix(name, ":") {
+			owners[name] = name
+			continue
+		}
+		m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner %s", name)
+		var owner string
+		if err := obj.Call("org.freedesktop.DBus.GetNameOwner", 0, name).Store(&owner); err != nil {
+			m.log("error org.freedesktop.DBus.GetNameOwner %s: %v", name, err)
+			continue
+		}
+		owners[name] = owner
+		m.log("reply org.freedesktop.DBus.GetNameOwner %s: %s", name, owner)
+	}
+	return owners
+}
+
+func wellKnownNamesByOwner(owners map[string]string) map[string][]string {
+	byOwner := make(map[string][]string)
+	for name, owner := range owners {
+		if strings.HasPrefix(name, ":") || owner == "" {
+			continue
+		}
+		byOwner[owner] = append(byOwner[owner], name)
+	}
+	for owner := range byOwner {
+		sort.Strings(byOwner[owner])
+	}
+	return byOwner
+}
+
+func busNameDisplayName(name string, owners map[string]string, wellKnownByOwner map[string][]string) string {
+	if strings.HasPrefix(name, ":") {
+		wellKnown := wellKnownByOwner[name]
+		if len(wellKnown) == 0 {
+			return name
+		}
+		return fmt.Sprintf("%s [%s]", name, strings.Join(wellKnown, ", "))
+	}
+	if owner := owners[name]; owner != "" {
+		return fmt.Sprintf("%s [%s]", name, owner)
+	}
+	return name
+}
+
+func (m *model) busNameMetadata(name string, activatable map[string]bool, owners map[string]string) string {
 	lines := []string{"kind: " + busNameKind(name)}
 	if activatable[name] {
 		lines = append(lines, "activatable: yes")
@@ -283,14 +334,10 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool) string
 
 	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
 	if !strings.HasPrefix(name, ":") {
-		m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner %s", name)
-		var owner string
-		if err := obj.Call("org.freedesktop.DBus.GetNameOwner", 0, name).Store(&owner); err != nil {
-			lines = append(lines, "owner: <none>")
-			m.log("error org.freedesktop.DBus.GetNameOwner %s: %v", name, err)
-		} else {
+		if owner := owners[name]; owner != "" {
 			lines = append(lines, "owner: "+owner)
-			m.log("reply org.freedesktop.DBus.GetNameOwner %s: %s", name, owner)
+		} else {
+			lines = append(lines, "owner: <none>")
 		}
 	}
 
