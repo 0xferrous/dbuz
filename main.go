@@ -798,21 +798,19 @@ func (m model) View() string {
 		m.help.View(keys),
 	)
 	if m.modal != nil {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, renderCallModal(*m.modal, m.width, m.height))
+		return overlay(view, renderCallModal(*m.modal, m.width, m.height), m.width, m.height)
 	}
 	return view
 }
 
 func renderCallModal(modal callModal, terminalWidth, terminalHeight int) string {
-	width := clamp(terminalWidth*3/5, 50, max(50, terminalWidth-4))
+	width := clamp(terminalWidth*4/5, 70, max(70, terminalWidth-4))
 	height := clamp(terminalHeight*3/5, 12, max(12, terminalHeight-4))
 	innerWidth := width - 4
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render("Call method"),
-		truncate(modal.method.busName+" "+modal.method.objectPath, innerWidth),
-		truncate(modal.method.interface_+"."+modal.method.memberName, innerWidth),
-		strings.Repeat("─", innerWidth),
-	}
+	lines := []string{lipgloss.NewStyle().Bold(true).Render("Call method")}
+	lines = append(lines, wrapLine(modal.method.busName+" "+modal.method.objectPath, innerWidth)...)
+	lines = append(lines, wrapLine(modal.method.interface_+"."+modal.method.memberName, innerWidth)...)
+	lines = append(lines, strings.Repeat("─", innerWidth))
 
 	if len(modal.inputs) == 0 {
 		lines = append(lines, "no input arguments")
@@ -844,6 +842,43 @@ func renderCallModal(modal callModal, terminalWidth, terminalHeight int) string 
 		Width(width).
 		Height(height).
 		Render(strings.Join(lines, "\n"))
+}
+
+func overlay(base, modal string, width, height int) string {
+	baseLines := strings.Split(base, "\n")
+	modalLines := strings.Split(modal, "\n")
+	x := max(0, (width-lipgloss.Width(modal))/2)
+	y := max(0, (height-lipgloss.Height(modal))/2)
+
+	out := make([]string, max(len(baseLines), y+len(modalLines)))
+	copy(out, baseLines)
+	for i, modalLine := range modalLines {
+		lineIndex := y + i
+		background := ""
+		if lineIndex < len(baseLines) {
+			background = baseLines[lineIndex]
+		}
+		// Carriage return lets the modal draw over the already-rendered background
+		// line while preserving the surrounding UI outside the modal area.
+		out[lineIndex] = background + "\r" + strings.Repeat(" ", x) + modalLine
+	}
+	return strings.Join(out, "\n")
+}
+
+func wrapLine(line string, width int) []string {
+	if textWidth(line) <= width {
+		return []string{line}
+	}
+	runes := []rune(line)
+	lines := make([]string, 0, (len(runes)/width)+1)
+	for len(runes) > width {
+		lines = append(lines, string(runes[:width]))
+		runes = runes[width:]
+	}
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
+	}
+	return lines
 }
 
 func (m model) breadcrumb() string {
