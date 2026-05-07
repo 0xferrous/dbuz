@@ -490,7 +490,7 @@ func (p *pane) ensureCursorVisible(viewport int) {
 func (m model) pageSize() int {
 	// Explorer height minus pane header/separator and optional selected-item metadata.
 	logHeight := m.logViewportHeight()
-	paneHeight := max(1, m.height-logHeight-5)
+	paneHeight := max(1, m.height-logHeight-6)
 	metaHeight := 0
 	if p := m.activePane(); p != nil {
 		metaHeight = metadataBlockHeight(*p, paneHeight)
@@ -544,7 +544,7 @@ func (m model) View() string {
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
 	logHeight := m.logViewportHeight()
-	availableHeight := max(1, m.height-logHeight-5)
+	availableHeight := max(1, m.height-logHeight-6)
 	visible := visiblePanes(m.panes, m.width)
 
 	rendered := make([]string, 0, len(visible))
