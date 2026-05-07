@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -666,6 +667,7 @@ func (m *model) callModalMethod() {
 }
 
 func parseDBusInput(signature, raw string) (any, error) {
+	raw = strings.TrimSpace(raw)
 	switch signature {
 	case "s", "o", "g":
 		return raw, nil
@@ -710,16 +712,69 @@ func parseDBusInput(signature, raw string) (any, error) {
 		_, err := fmt.Sscan(raw, &v)
 		return v, err
 	case "as":
-		if raw == "" {
-			return []string{}, nil
-		}
-		parts := strings.Split(raw, ",")
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		return parts, nil
+		return parseStringArray(raw)
+	case "a{sv}":
+		return parseVariantMap(raw)
 	default:
 		return nil, fmt.Errorf("input parsing for %q not supported yet", signature)
+	}
+}
+
+func parseStringArray(raw string) ([]string, error) {
+	if raw == "" {
+		return []string{}, nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, err
+		}
+		return values, nil
+	}
+	parts := strings.Split(raw, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts, nil
+}
+
+func parseVariantMap(raw string) (map[string]dbus.Variant, error) {
+	if raw == "" {
+		raw = "{}"
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, err
+	}
+
+	variants := make(map[string]dbus.Variant, len(values))
+	for key, value := range values {
+		variants[key] = dbus.MakeVariant(jsonValueToDBus(value))
+	}
+	return variants, nil
+}
+
+func jsonValueToDBus(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		mapped := make(map[string]dbus.Variant, len(value))
+		for key, nested := range value {
+			mapped[key] = dbus.MakeVariant(jsonValueToDBus(nested))
+		}
+		return mapped
+	case []any:
+		items := make([]any, len(value))
+		for i, nested := range value {
+			items[i] = jsonValueToDBus(nested)
+		}
+		return items
+	case float64:
+		if value == float64(int32(value)) {
+			return int32(value)
+		}
+		return value
+	default:
+		return value
 	}
 }
 
