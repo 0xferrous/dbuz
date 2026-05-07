@@ -1474,13 +1474,10 @@ func paneDisplayWidth(p pane, terminalWidth int) int {
 		contentWidth = max(contentWidth, textWidth(kindIcon(entry.kind)+entry.name))
 	}
 
-	for _, line := range selectedMetadataLines(p) {
-		contentWidth = max(contentWidth, textWidth(line))
-	}
-
-	// Add room for borders/padding, then clamp to terminal width. Pane selection
-	// already drops older panes when the stack no longer fits, so a pane with
-	// wide signatures/metadata is allowed to grow.
+	// Do not include metadata width here. Metadata is rendered inside whatever
+	// width the list/title needs and may be truncated. Letting metadata determine
+	// pane width causes long owner lists, annotations, or /nix/store paths to make
+	// one pane consume the whole terminal.
 	return clamp(contentWidth+4, 24, max(24, terminalWidth-2))
 }
 
