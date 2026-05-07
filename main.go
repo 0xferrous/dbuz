@@ -578,14 +578,19 @@ func (p *pane) ensureCursorVisible(viewport int) {
 }
 
 func (m model) pageSize() int {
-	// Explorer height minus pane header/separator and optional selected-item metadata.
-	logHeight := m.logViewportHeight()
-	paneHeight := max(1, m.height-logHeight-6)
+	paneHeight := m.paneContentHeight()
 	metaHeight := 0
 	if p := m.activePane(); p != nil {
 		metaHeight = metadataBlockHeight(*p, paneHeight)
 	}
 	return max(1, paneHeight-3-metaHeight)
+}
+
+func (m model) paneContentHeight() int {
+	// Rendered layout is: breadcrumb + pane borders + log borders + help.
+	// lipgloss Height() is content height; borders add two rows each.
+	helpHeight := lipgloss.Height(m.help.View(keys))
+	return max(1, m.height-1-2-m.logViewportHeight()-2-helpHeight)
 }
 
 func (m *model) dive() {
@@ -938,7 +943,7 @@ func (m model) View() string {
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
 	logHeight := m.logViewportHeight()
-	availableHeight := max(1, m.height-logHeight-6)
+	availableHeight := m.paneContentHeight()
 	visible := visiblePanes(m.panes, m.width)
 
 	rendered := make([]string, 0, len(visible))
@@ -1152,8 +1157,11 @@ func metadataBlockHeight(p pane, paneHeight int) int {
 	if len(lines) == 0 {
 		return 0
 	}
-	// Separator + metadata, leaving header/separator and at least one list row.
-	return min(len(lines)+1, max(0, paneHeight-4))
+	// Separator + metadata. Keep at least a few rows for the list and cap the
+	// metadata block so large annotations/arg lists cannot push the pane/breadcrumb
+	// outside the terminal.
+	maxMetadata := max(0, min(paneHeight/2, paneHeight-6))
+	return min(len(lines)+1, maxMetadata)
 }
 
 func selectedMetadataLines(p pane) []string {
