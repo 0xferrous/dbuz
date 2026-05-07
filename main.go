@@ -567,23 +567,29 @@ func (m model) View() string {
 
 func (m model) breadcrumb() string {
 	parts := make([]string, 0, len(m.panes)+1)
-	for _, p := range m.panes {
-		if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+	for i, p := range m.panes {
+		if i == 0 {
+			if selected, ok := selectedEntry(p); ok && selected.kind == entryBus {
+				parts = append(parts, selected.name)
+			}
 			continue
 		}
 
-		selected := p.entries[p.cursor]
-		switch selected.kind {
-		case entryBus:
-			parts = append(parts, selected.name)
-		case entryBusName:
-			parts = append(parts, selected.busName)
-		case entryObject:
-			parts = append(parts, selected.objectPath)
-		case entryInterface:
-			parts = append(parts, selected.interface_)
-		case entryMethod, entryProperty, entrySignal:
-			parts = append(parts, selected.name)
+		switch {
+		case strings.HasSuffix(p.title, " bus"):
+			if selected, ok := selectedEntry(p); ok {
+				parts = append(parts, selected.busName)
+			}
+		case strings.HasPrefix(p.title, "/"):
+			parts = append(parts, p.title)
+			if selected, ok := selectedEntry(p); ok && selected.kind == entryInterface {
+				parts = append(parts, selected.interface_)
+			}
+		default:
+			parts = append(parts, p.title)
+			if selected, ok := selectedEntry(p); ok && (selected.kind == entryMethod || selected.kind == entryProperty || selected.kind == entrySignal) {
+				parts = append(parts, selected.name)
+			}
 		}
 	}
 
@@ -591,6 +597,13 @@ func (m model) breadcrumb() string {
 		return ""
 	}
 	return strings.Join(parts, " › ")
+}
+
+func selectedEntry(p pane) (entry, bool) {
+	if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
+		return entry{}, false
+	}
+	return p.entries[p.cursor], true
 }
 
 func renderLogPane(logs []logEntry, scroll, width, height int) string {
