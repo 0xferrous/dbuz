@@ -1,0 +1,9 @@
+# Go
+/bin/
+*.test
+coverage.out
+
+# Local
+.env
+.cache/
+result
