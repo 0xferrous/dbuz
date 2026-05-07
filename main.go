@@ -328,21 +328,10 @@ func busNameDisplayName(name string, owners map[string]string, wellKnownByOwner 
 }
 
 func (m *model) busNameMetadata(name string, activatable map[string]bool, owners map[string]string, wellKnownByOwner map[string][]string) string {
-	lines := []string{"kind: " + busNameKind(name)}
-	if activatable[name] {
-		lines = append(lines, "activatable: yes")
-	}
-
+	lines := make([]string, 0, 8)
 	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
-	if strings.HasPrefix(name, ":") {
-		wellKnown := wellKnownByOwner[name]
-		if len(wellKnown) > 0 {
-			lines = append(lines, "well-known names:")
-			for _, ownedName := range wellKnown {
-				lines = append(lines, "  "+ownedName)
-			}
-		}
-	} else {
+
+	if !strings.HasPrefix(name, ":") {
 		if owner := owners[name]; owner != "" {
 			lines = append(lines, "owner: "+owner)
 		} else {
@@ -357,6 +346,21 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool, owners
 	} else {
 		lines = append(lines, "pid: "+formatPID(pid))
 		m.log("reply org.freedesktop.DBus.GetConnectionUnixProcessID %s: %d", name, pid)
+	}
+
+	lines = append(lines, "kind: "+busNameKind(name))
+	if activatable[name] {
+		lines = append(lines, "activatable: yes")
+	}
+
+	if strings.HasPrefix(name, ":") {
+		wellKnown := wellKnownByOwner[name]
+		if len(wellKnown) > 0 {
+			lines = append(lines, "well-known names:")
+			for _, ownedName := range wellKnown {
+				lines = append(lines, "  "+ownedName)
+			}
+		}
 	}
 
 	var uid uint32
