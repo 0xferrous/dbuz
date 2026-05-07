@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -354,7 +355,7 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool, owners
 	if err := obj.Call("org.freedesktop.DBus.GetConnectionUnixProcessID", 0, name).Store(&pid); err != nil {
 		m.log("error org.freedesktop.DBus.GetConnectionUnixProcessID %s: %v", name, err)
 	} else {
-		lines = append(lines, fmt.Sprintf("pid: %d", pid))
+		lines = append(lines, "pid: "+formatPID(pid))
 		m.log("reply org.freedesktop.DBus.GetConnectionUnixProcessID %s: %d", name, pid)
 	}
 
@@ -368,6 +369,28 @@ func (m *model) busNameMetadata(name string, activatable map[string]bool, owners
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func formatPID(pid uint32) string {
+	pidText := fmt.Sprint(pid)
+	exe, err := os.Readlink(filepath.Join("/proc", pidText, "exe"))
+	if err != nil || exe == "" {
+		return pidText
+	}
+	return fmt.Sprintf("%s (%s %s)", pidText, filepath.Base(exe), shortenMiddle(exe, 48))
+}
+
+func shortenMiddle(s string, width int) string {
+	runes := []rune(s)
+	if len(runes) <= width {
+		return s
+	}
+	if width <= 3 {
+		return "..."
+	}
+	prefix := (width - 3) / 2
+	suffix := width - 3 - prefix
+	return string(runes[:prefix]) + "..." + string(runes[len(runes)-suffix:])
 }
 
 func formatUID(uid uint32) string {
