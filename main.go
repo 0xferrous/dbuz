@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -19,6 +20,8 @@ type keyMap struct {
 	Down     key.Binding
 	PageUp   key.Binding
 	PageDown key.Binding
+	LogUp    key.Binding
+	LogDown  key.Binding
 	Enter    key.Binding
 	Back     key.Binding
 	Quit     key.Binding
@@ -29,7 +32,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.PageUp, k.PageDown}, {k.Enter, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.PageUp, k.PageDown}, {k.LogUp, k.LogDown, k.Enter, k.Back, k.Quit}}
 }
 
 var keys = keyMap{
@@ -48,6 +51,14 @@ var keys = keyMap{
 	PageDown: key.NewBinding(
 		key.WithKeys("pgdown", "ctrl+d"),
 		key.WithHelp("pgdn", "page down"),
+	),
+	LogUp: key.NewBinding(
+		key.WithKeys("["),
+		key.WithHelp("[", "log up"),
+	),
+	LogDown: key.NewBinding(
+		key.WithKeys("]"),
+		key.WithHelp("]", "log down"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("right", "l", "enter"),
@@ -96,12 +107,19 @@ type pane struct {
 	err     error
 }
 
+type logEntry struct {
+	time    time.Time
+	message string
+}
+
 type model struct {
-	help   help.Model
-	width  int
-	height int
-	conn   *dbus.Conn
-	panes  []pane
+	help      help.Model
+	width     int
+	height    int
+	conn      *dbus.Conn
+	panes     []pane
+	logs      []logEntry
+	logScroll int
 }
 
 type introspectNode struct {
@@ -148,7 +166,7 @@ type introspectAnnotation struct {
 }
 
 func initialModel() model {
-	return model{
+	m := model{
 		help: help.New(),
 		panes: []pane{{
 			title: "D-Bus",
@@ -158,9 +176,21 @@ func initialModel() model {
 			},
 		}},
 	}
+	m.log("initialized")
+	return m
+}
+
+func (m *model) log(format string, args ...any) {
+	m.logs = append(m.logs, logEntry{time: time.Now(), message: fmt.Sprintf(format, args...)})
+	m.logScroll = max(0, len(m.logs)-m.logViewportHeight())
+}
+
+func (m model) logViewportHeight() int {
+	return 6
 }
 
 func (m *model) connectBus(busType string) error {
+	m.log("connect %s bus", busType)
 	if m.conn != nil {
 		m.conn.Close()
 		m.conn = nil
@@ -176,23 +206,28 @@ func (m *model) connectBus(busType string) error {
 		conn, err = dbus.ConnectSessionBus()
 	}
 	if err != nil {
+		m.log("connect %s bus error: %v", busType, err)
 		return err
 	}
 
 	m.conn = conn
+	m.log("connected %s bus", busType)
 	return nil
 }
 
-func (m model) readBusNamesPane(busType string) pane {
+func (m *model) readBusNamesPane(busType string) pane {
 	p := pane{title: busType + " bus"}
 	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
 
+	m.log("call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames")
 	var names []string
 	if err := obj.Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
+		m.log("error org.freedesktop.DBus.ListNames: %v", err)
 		p.err = err
 		return p
 	}
 
+	m.log("reply org.freedesktop.DBus.ListNames: %d names", len(names))
 	sort.Strings(names)
 	p.entries = make([]entry, 0, len(names))
 	for _, name := range names {
@@ -207,7 +242,7 @@ func (m model) readBusNamesPane(busType string) pane {
 	return p
 }
 
-func (m model) readObjectPane(busName, objectPath string) pane {
+func (m *model) readObjectPane(busName, objectPath string) pane {
 	p := pane{title: objectPath}
 	node, err := m.introspect(busName, objectPath)
 	if err != nil {
@@ -243,7 +278,7 @@ func (m model) readObjectPane(busName, objectPath string) pane {
 	return p
 }
 
-func (m model) readInterfacePane(busName, objectPath, interfaceName string) pane {
+func (m *model) readInterfacePane(busName, objectPath, interfaceName string) pane {
 	p := pane{title: interfaceName}
 	node, err := m.introspect(busName, objectPath)
 	if err != nil {
@@ -296,17 +331,21 @@ func (m model) readInterfacePane(busName, objectPath, interfaceName string) pane
 	return p
 }
 
-func (m model) introspect(busName, objectPath string) (introspectNode, error) {
+func (m *model) introspect(busName, objectPath string) (introspectNode, error) {
 	var xmlText string
 	obj := m.conn.Object(busName, dbus.ObjectPath(objectPath))
+	m.log("call %s %s org.freedesktop.DBus.Introspectable.Introspect", busName, objectPath)
 	if err := obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&xmlText); err != nil {
+		m.log("error introspect %s %s: %v", busName, objectPath, err)
 		return introspectNode{}, err
 	}
 
 	var node introspectNode
 	if err := xml.Unmarshal([]byte(xmlText), &node); err != nil {
+		m.log("error parse introspection %s %s: %v", busName, objectPath, err)
 		return introspectNode{}, err
 	}
+	m.log("reply introspect %s %s: %d nodes, %d interfaces", busName, objectPath, len(node.Nodes), len(node.Interfaces))
 	return node, nil
 }
 
@@ -390,6 +429,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pageMove(-1)
 		case key.Matches(msg, keys.PageDown):
 			m.pageMove(1)
+		case key.Matches(msg, keys.LogUp):
+			m.scrollLog(-1)
+		case key.Matches(msg, keys.LogDown):
+			m.scrollLog(1)
 		case key.Matches(msg, keys.Enter):
 			m.dive()
 		case key.Matches(msg, keys.Back):
@@ -415,6 +458,10 @@ func (m *model) moveCursor(delta int) {
 
 	p.cursor = clamp(p.cursor+delta, 0, len(p.entries)-1)
 	p.ensureCursorVisible(m.pageSize())
+}
+
+func (m *model) scrollLog(delta int) {
+	m.logScroll = clamp(m.logScroll+delta, 0, max(0, len(m.logs)-m.logViewportHeight()))
 }
 
 func (m *model) pageMove(direction int) {
@@ -490,7 +537,8 @@ func (m model) View() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
-	availableHeight := max(1, m.height-4)
+	logHeight := m.logViewportHeight()
+	availableHeight := max(1, m.height-logHeight-5)
 	visible := visiblePanes(m.panes, m.width)
 
 	rendered := make([]string, 0, len(visible))
@@ -509,8 +557,27 @@ func (m model) View() string {
 		lipgloss.Left,
 		titleStyle.Render("dbus-debug")+" "+statusStyle.Render(path),
 		tree,
+		renderLogPane(m.logs, m.logScroll, m.width, logHeight),
 		m.help.View(keys),
 	)
+}
+
+func renderLogPane(logs []logEntry, scroll, width, height int) string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#45475A")).
+		Width(max(24, width-2)).
+		Height(height)
+
+	viewport := max(1, height-2)
+	start := clamp(scroll, 0, max(0, len(logs)-viewport))
+	end := min(len(logs), start+viewport)
+	lines := []string{lipgloss.NewStyle().Bold(true).Render("log")}
+	for _, entry := range logs[start:end] {
+		line := fmt.Sprintf("%s %s", entry.time.Format("15:04:05.000"), entry.message)
+		lines = append(lines, truncate(line, max(1, width-4)))
+	}
+	return style.Render(strings.Join(lines, "\n"))
 }
 
 func renderPane(p pane, width, height int, active bool) string {
