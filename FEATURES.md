@@ -1,6 +1,6 @@
-# dbus-debug Feature Ideas
+# dbuz Feature Ideas
 
-`dbus-debug` aims to be an interactive TUI for exploring, debugging, and interacting with D-Bus without manually crafting `busctl` or `gdbus` commands.
+`dbuz` aims to be an interactive TUI for exploring, debugging, and interacting with D-Bus without manually crafting `busctl` or `gdbus` commands.
 
 ## Core Explorer
 

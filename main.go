@@ -1049,7 +1049,7 @@ func (m model) View() string {
 
 	view := lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render("dbus-debug")+" "+statusStyle.Render(breadcrumb),
+		titleStyle.Render("dbuz")+" "+statusStyle.Render(breadcrumb),
 		tree,
 		renderLogPane(m.logs, m.logScroll, m.width, logHeight),
 		m.help.View(keys),

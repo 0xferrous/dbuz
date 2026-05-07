@@ -1,4 +1,4 @@
-module github.com/0xferrous/dbus-debug
+module github.com/0xferrous/dbuz
 
 go 1.22
 

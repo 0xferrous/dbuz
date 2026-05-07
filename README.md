@@ -1,6 +1,6 @@
-# dbus-debug
+# dbuz
 
-`dbus-debug` is a terminal UI for exploring and interacting with D-Bus without manually crafting `busctl` or `gdbus` commands.
+`dbuz` is a terminal UI for exploring and interacting with D-Bus without manually crafting `busctl` or `gdbus` commands.
 
 It lets you browse buses, services, object paths, interfaces, methods, properties, and signals in a stacked-pane interface.
 
@@ -78,7 +78,7 @@ There are two broad kinds:
 
 Well-known names are usually what humans care about. Unique names identify a specific connection to the bus.
 
-`dbus-debug` shows metadata for selected bus names when available:
+`dbuz` shows metadata for selected bus names when available:
 
 - kind: `well-known` or `unique`
 - whether the name is activatable
@@ -205,7 +205,7 @@ This tells clients what exists at an object path:
 - signals
 - annotations
 
-`dbus-debug` uses introspection to populate panes.
+`dbuz` uses introspection to populate panes.
 
 Caveats:
 
@@ -258,7 +258,7 @@ a{sv}         dictionary<string, variant>
 (sa{sv}as)    struct<string, dictionary<string, variant>, array<string>>
 ```
 
-`dbus-debug` decodes these signatures in metadata so you do not have to remember them.
+`dbuz` decodes these signatures in metadata so you do not have to remember them.
 
 ## Variants
 
@@ -289,7 +289,7 @@ They may describe things like:
 - language/tool-specific metadata
 - custom service-specific hints
 
-Annotations are optional and not always standardized. `dbus-debug` shows annotations when present.
+Annotations are optional and not always standardized. `dbuz` shows annotations when present.
 
 ## Debug log
 

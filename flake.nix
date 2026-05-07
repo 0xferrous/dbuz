@@ -1,5 +1,5 @@
 {
-  description = "dbus-debug Go TUI";
+  description = "dbuz D-Bus TUI";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -13,15 +13,15 @@
       in
       {
         packages.default = pkgs.buildGoModule {
-          pname = "dbus-debug";
+          pname = "dbuz";
           version = "0.1.0";
           src = ./.;
 
           vendorHash = "sha256-H/yok1zYhLhNUgykEGSmcv4zdqQRhn6UXU8sQhjakpE=";
 
           meta = {
-            description = "Go TUI for D-Bus debugging";
-            mainProgram = "dbus-debug";
+            description = "Terminal UI for exploring and interacting with D-Bus";
+            mainProgram = "dbuz";
           };
         };
 
