@@ -652,7 +652,7 @@ func (m *model) callModalMethod() {
 	}
 
 	member := method.interface_ + "." + method.memberName
-	m.log("call %s %s %s args=%v", method.busName, method.objectPath, member, args)
+	m.log("call %s %s %s sig=%s args=%v", method.busName, method.objectPath, member, dbusInputSignature(method.args), args)
 	call := m.conn.Object(method.busName, dbus.ObjectPath(method.objectPath)).Call(member, 0, args...)
 	if call.Err != nil {
 		m.modal.err = call.Err.Error()
@@ -667,19 +667,7 @@ func (m *model) callModalMethod() {
 }
 
 func isOutArg(arg introspectArg) bool {
-	direction := strings.TrimSpace(arg.Direction)
-	if direction == "out" {
-		return true
-	}
-	if direction != "" {
-		return false
-	}
-
-	// Some services expose incomplete introspection and omit method arg
-	// directions. Portal implementations commonly list output args named
-	// "handle"/"results" without marking them as out, which otherwise makes us
-	// send too many args and D-Bus replies with "Invalid type / number of args".
-	return (arg.Name == "handle" && arg.Type == "o") || (arg.Name == "results" && arg.Type == "a{sv}")
+	return strings.TrimSpace(arg.Direction) == "out"
 }
 
 func parseDBusInput(signature, raw string) (any, error) {
@@ -742,6 +730,16 @@ func parseDBusInput(signature, raw string) (any, error) {
 	default:
 		return nil, fmt.Errorf("input parsing for %q not supported yet", signature)
 	}
+}
+
+func dbusInputSignature(args []introspectArg) string {
+	var b strings.Builder
+	for _, arg := range args {
+		if !isOutArg(arg) {
+			b.WriteString(arg.Type)
+		}
+	}
+	return b.String()
 }
 
 func parseStringArray(raw string) ([]string, error) {
