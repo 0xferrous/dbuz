@@ -252,7 +252,7 @@ func (m *model) readBusNamesPane(busType string) pane {
 		displayName := busNameDisplayName(name, owners, wellKnownByOwner)
 		p.entries = append(p.entries, entry{
 			name:       displayName,
-			detail:     m.busNameMetadata(name, activatable, owners),
+			detail:     m.busNameMetadata(name, activatable, owners, wellKnownByOwner),
 			path:       name,
 			busName:    name,
 			objectPath: "/",
@@ -318,7 +318,7 @@ func busNameDisplayName(name string, owners map[string]string, wellKnownByOwner 
 		if len(wellKnown) == 0 {
 			return name
 		}
-		return fmt.Sprintf("%s [%s]", name, strings.Join(wellKnown, ", "))
+		return fmt.Sprintf("%s [%s]", name, truncate(strings.Join(wellKnown, ", "), 32))
 	}
 	if owner := owners[name]; owner != "" {
 		return fmt.Sprintf("%s [%s]", name, owner)
@@ -326,14 +326,22 @@ func busNameDisplayName(name string, owners map[string]string, wellKnownByOwner 
 	return name
 }
 
-func (m *model) busNameMetadata(name string, activatable map[string]bool, owners map[string]string) string {
+func (m *model) busNameMetadata(name string, activatable map[string]bool, owners map[string]string, wellKnownByOwner map[string][]string) string {
 	lines := []string{"kind: " + busNameKind(name)}
 	if activatable[name] {
 		lines = append(lines, "activatable: yes")
 	}
 
 	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
-	if !strings.HasPrefix(name, ":") {
+	if strings.HasPrefix(name, ":") {
+		wellKnown := wellKnownByOwner[name]
+		if len(wellKnown) > 0 {
+			lines = append(lines, "well-known names:")
+			for _, ownedName := range wellKnown {
+				lines = append(lines, "  "+ownedName)
+			}
+		}
+	} else {
 		if owner := owners[name]; owner != "" {
 			lines = append(lines, "owner: "+owner)
 		} else {
