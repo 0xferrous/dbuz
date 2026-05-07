@@ -767,10 +767,14 @@ func paneDisplayWidth(p pane, terminalWidth int) int {
 		contentWidth = max(contentWidth, textWidth(kindIcon(entry.kind)+entry.name))
 	}
 
-	// Add room for borders/padding, then clamp so very long D-Bus names do not
-	// monopolize the screen. This keeps panes compact by default while still
-	// fitting the largest visible item when practical.
-	return clamp(contentWidth+4, 24, max(24, min(56, terminalWidth-2)))
+	for _, line := range selectedMetadataLines(p) {
+		contentWidth = max(contentWidth, textWidth(line))
+	}
+
+	// Add room for borders/padding, then clamp to terminal width. Pane selection
+	// already drops older panes when the stack no longer fits, so a pane with
+	// wide signatures/metadata is allowed to grow.
+	return clamp(contentWidth+4, 24, max(24, terminalWidth-2))
 }
 
 func visiblePanes(panes []pane, width int) []pane {
