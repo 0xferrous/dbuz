@@ -854,13 +854,10 @@ func overlay(base, modal string, width, height int) string {
 	copy(out, baseLines)
 	for i, modalLine := range modalLines {
 		lineIndex := y + i
-		background := ""
-		if lineIndex < len(baseLines) {
-			background = baseLines[lineIndex]
-		}
-		// Carriage return lets the modal draw over the already-rendered background
-		// line while preserving the surrounding UI outside the modal area.
-		out[lineIndex] = background + "\r" + strings.Repeat(" ", x) + modalLine
+		// Bubble Tea renders strings line-by-line; embedded carriage returns are not
+		// a reliable way to composite an overlay. Replace the affected rows with a
+		// centered modal row so the modal is always visible.
+		out[lineIndex] = strings.Repeat(" ", x) + modalLine
 	}
 	return strings.Join(out, "\n")
 }
